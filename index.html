@@ -63,8 +63,8 @@
 
     function init() {
       scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
-      camera.position.set(0, 1.6, 2);
+      camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 1.5, 7);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -75,11 +75,14 @@
       scene.add(light);
       scene.add(new THREE.AmbientLight(0x404040));
 
+      // Create OrbitControls but disable them
       const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enabled = false; // Disable mouse control
+
       clock = new THREE.Clock();
 
       // Create UI controls
-      createVisemeControls();
+      // createVisemeControls();
     }
 
     function createVisemeControls() {
@@ -169,6 +172,10 @@
         gltf => {
           avatar = gltf.scene;
           avatar.scale.set(1, 1, 1);
+          
+          // Position the avatar lower on the screen
+          avatar.position.y = -1; // Adjust this value as needed
+          
           scene.add(avatar);
 
           // Get viseme blendshapes from skinned mesh
