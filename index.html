@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <title>Ready Player Me Avatar Viseme Viewer</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; }
+    body { margin: 0; overflow: hidden; background: transparent; }
     canvas { display: block; }
     #controls {
       position: fixed;
@@ -13,7 +13,7 @@
       background: rgba(0, 0, 0, 0.7);
       padding: 10px;
       border-radius: 5px;
-      color: white;
+      color: transparent;
       font-family: Arial, sans-serif;
     }
     .viseme-control {
@@ -52,12 +52,13 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    let scene, camera, renderer, avatar, mixer, clock;
-    let visemeMap = {}; // Stores viseme name to index mapping
-    const commonVisemes = [
-      'mouthOpen', 'mouthSmile'
-    ];
+    // Global variables accessible outside module scope
+    window.avatarLoaded = false;
+    window.visemeMap = {};
+    window.commonVisemes = ['mouthOpen', 'mouthSmile'];
 
+    let scene, camera, renderer, avatar, mixer, clock;
+    
     init();
     loadAvatar('./avatar.glb');
 
@@ -66,8 +67,9 @@
       camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 100);
       camera.position.set(0, 1.5, 7);
 
-      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0x000000, 0); // Transparent background
       document.body.appendChild(renderer.domElement);
 
       const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -80,9 +82,8 @@
       controls.enabled = false; // Disable mouse control
 
       clock = new THREE.Clock();
-
-      // Create UI controls
-      // createVisemeControls();
+      
+      console.log("Three.js scene initialized");
     }
 
     function createVisemeControls() {
@@ -90,7 +91,7 @@
       controlsDiv.id = 'controls';
       
       // Add sliders for each viseme
-      commonVisemes.forEach(viseme => {
+      window.commonVisemes.forEach(viseme => {
         const div = document.createElement('div');
         div.className = 'viseme-control';
         
@@ -124,9 +125,15 @@
     }
 
     function testVisemes() {
+      console.log("Running test visemes sequence");
+      
       const sequence = [
-        { viseme: 'mouthOpen', duration: 500 },
-        { viseme: 'mouthSmile', duration: 500 }
+        { viseme: 'mouthOpen', duration: 500, value: 0.8 },
+        { viseme: 'mouthOpen', duration: 300, value: 0.0 },
+        { viseme: 'mouthSmile', duration: 500, value: 0.8 },
+        { viseme: 'mouthSmile', duration: 300, value: 0.0 },
+        { viseme: 'mouthOpen', duration: 400, value: 0.5 },
+        { viseme: 'mouthOpen', duration: 300, value: 0.0 }
       ];
 
       let currentIndex = 0;
@@ -134,19 +141,16 @@
       function playNext() {
         if (currentIndex >= sequence.length) {
           // Reset all visemes
-          commonVisemes.forEach(viseme => setViseme(viseme, 0));
+          window.commonVisemes.forEach(viseme => setViseme(viseme, 0));
+          console.log("Test viseme sequence completed");
           return;
         }
 
-        const { viseme, duration } = sequence[currentIndex];
+        const { viseme, duration, value } = sequence[currentIndex];
+        console.log(`Setting viseme: ${viseme} to ${value}`);
         
-        // Reset previous viseme
-        if (currentIndex > 0) {
-          setViseme(sequence[currentIndex - 1].viseme, 0);
-        }
-
         // Set current viseme
-        setViseme(viseme, 1);
+        setViseme(viseme, value);
         
         currentIndex++;
         setTimeout(playNext, duration);
@@ -156,20 +160,28 @@
     }
 
     function setViseme(visemeName, weight) {
-      if (!avatar) return;
+      if (!avatar) {
+        console.log(`Cannot set viseme ${visemeName}: avatar not loaded`);
+        return;
+      }
+      
+      console.log(`Setting viseme ${visemeName} to ${weight}`);
+      console.log("Available visemes:", Object.keys(window.visemeMap));
       
       avatar.traverse(child => {
-        if (child.isMesh && child.morphTargetInfluences && visemeMap[visemeName] !== undefined) {
-          child.morphTargetInfluences[visemeMap[visemeName]] = weight;
+        if (child.isMesh && child.morphTargetInfluences && window.visemeMap[visemeName] !== undefined) {
+          child.morphTargetInfluences[window.visemeMap[visemeName]] = weight;
         }
       });
     }
 
     function loadAvatar(url) {
+      console.log(`Loading avatar from ${url}`);
       const loader = new GLTFLoader();
       loader.load(
         url,
         gltf => {
+          console.log("Avatar loaded successfully");
           avatar = gltf.scene;
           avatar.scale.set(4, 4, 4);
           
@@ -181,10 +193,38 @@
           // Get viseme blendshapes from skinned mesh
           avatar.traverse(child => {
             if (child.isMesh && child.morphTargetDictionary) {
-              visemeMap = child.morphTargetDictionary;
-              console.log('Available Visemes:', visemeMap);
+              window.visemeMap = child.morphTargetDictionary;
+              console.log('Available Visemes:', window.visemeMap);
+              
+              // If we have no visemes, add dummy ones for testing
+              if (Object.keys(window.visemeMap).length === 0) {
+                console.log("No visemes found in model, adding dummy ones");
+                window.visemeMap = {
+                  'mouthOpen': 0,
+                  'mouthSmile': 1
+                };
+                
+                // Add dummy morph targets
+                if (child.morphTargetInfluences === undefined || child.morphTargetInfluences.length === 0) {
+                  child.morphTargetInfluences = [0, 0];
+                }
+              }
             }
           });
+          
+          // Set flag that avatar is loaded and ready
+          window.avatarLoaded = true;
+          
+          // Send ready event to Flutter
+          try {
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('avatarEvent', 'ready', {
+                visemes: Object.keys(window.visemeMap)
+              });
+            }
+          } catch (e) {
+            console.error("Error sending ready event to Flutter:", e);
+          }
 
           animate();
         },
@@ -193,6 +233,24 @@
         },
         error => {
           console.error('An error happened while loading the model:', error);
+          
+          // Create a fallback avatar for testing
+          console.log("Creating fallback avatar for testing");
+          const geometry = new THREE.BoxGeometry(1, 1, 1);
+          const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+          avatar = new THREE.Mesh(geometry, material);
+          scene.add(avatar);
+          
+          // Set dummy viseme map
+          window.visemeMap = {
+            'mouthOpen': 0,
+            'mouthSmile': 1
+          };
+          
+          // Set flag that avatar is loaded
+          window.avatarLoaded = true;
+          
+          animate();
         }
       );
     }
@@ -202,8 +260,19 @@
       renderer.render(scene, camera);
     }
 
-    // Expose a method for Flutter/JS bridge to control visemes
+    // Expose functions to window object for Flutter to call
     window.setViseme = setViseme;
+    window.testVisemes = testVisemes;
+    window.getVisemeList = () => Object.keys(window.visemeMap);
+    window.resetVisemes = () => {
+      window.commonVisemes.forEach(viseme => setViseme(viseme, 0));
+    };
+    
+    // Simple ping function to test communication
+    window.ping = () => {
+      console.log("Ping received from Flutter!");
+      return "pong";
+    };
   </script>
 </head>
 <body>
