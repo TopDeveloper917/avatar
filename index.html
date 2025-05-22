@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Ready Player Me Avatar Viseme Viewer</title>
+  <title>Ready Player Me Avatar Speech Viewer</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
@@ -35,10 +35,30 @@
       border-radius: 3px;
       cursor: pointer;
     }
-    #test-button:hover {
-      background: #45a049;
+    #speech-controls {
+      margin-top: 15px;
+      border-top: 1px solid #555;
+      padding-top: 10px;
+    }
+    #speech-input {
+      width: 200px;
+      padding: 5px;
+      margin-right: 5px;
+    }
+    #speak-button {
+      padding: 5px 10px;
+      background: #2196F3;
+      border: none;
+      color: white;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    button:hover {
+      opacity: 0.9;
     }
   </style>
+  <!-- Import TalkingHead library -->
+  <script src="https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@v1.4.0/dist/TalkingHead.min.js"></script>
   <script type="importmap">
     {
       "imports": {
@@ -56,6 +76,8 @@
     window.avatarLoaded = false;
     window.visemeMap = {};
     window.commonVisemes = ['mouthOpen', 'mouthSmile'];
+    window.isSpeaking = false;
+    window.talkingHead = null;
 
     let scene, camera, renderer, avatar, mixer, clock;
     
@@ -83,6 +105,31 @@
       clock = new THREE.Clock();
       
       console.log("Three.js scene initialized");
+      
+      // Initialize TalkingHead
+      if (window.TalkingHead) {
+        window.talkingHead = new TalkingHead({
+          language: 'en',  // Default language English
+          rate: 1.0,       // Speech rate
+          pitch: .0,      // Speech pitch
+          volume: 1.0,     // Speech volume
+          audio: false,     // Enable audio by default
+          intensity: 2,  // Increased intensity for more pronounced visemes
+          smoothing: 0.5   // Smoothing factor for viseme transitions
+        });
+        console.log("TalkingHead initialized");
+      } else {
+        console.warn("TalkingHead library not found, speech functionality will be limited");
+      }
+      
+      // Listen for browser audioContext resuming
+      window.addEventListener('click', function() {
+        if (window.talkingHead && window.talkingHead.audioContext && 
+            window.talkingHead.audioContext.state === 'suspended') {
+          window.talkingHead.audioContext.resume();
+          console.log("Audio context resumed");
+        }
+      }, { once: true });
     }
 
     function createVisemeControls() {
@@ -119,6 +166,29 @@
       testButton.textContent = 'Test Visemes';
       testButton.addEventListener('click', testVisemes);
       controlsDiv.appendChild(testButton);
+
+      // Add speech controls
+      const speechControls = document.createElement('div');
+      speechControls.id = 'speech-controls';
+      
+      const speechInput = document.createElement('input');
+      speechInput.id = 'speech-input';
+      speechInput.type = 'text';
+      speechInput.placeholder = 'Enter text to speak...';
+      
+      const speakButton = document.createElement('button');
+      speakButton.id = 'speak-button';
+      speakButton.textContent = 'Speak';
+      speakButton.addEventListener('click', () => {
+        const text = speechInput.value.trim();
+        if (text) {
+          speakText(text);
+        }
+      });
+      
+      speechControls.appendChild(speechInput);
+      speechControls.appendChild(speakButton);
+      controlsDiv.appendChild(speechControls);
 
       document.body.appendChild(controlsDiv);
     }
@@ -165,13 +235,214 @@
       }
       
       console.log(`Setting viseme ${visemeName} to ${weight}`);
-      console.log("Available visemes:", Object.keys(window.visemeMap));
       
       avatar.traverse(child => {
         if (child.isMesh && child.morphTargetInfluences && window.visemeMap[visemeName] !== undefined) {
           child.morphTargetInfluences[window.visemeMap[visemeName]] = weight;
         }
       });
+    }
+
+    // Map phonemes to visemes - simplified mapping based on TalkingHead
+    const phoneToVisemeMap = {
+      'a': 'mouthOpen',
+      'e': 'mouthOpen',
+      'i': 'mouthSmile',
+      'o': 'mouthOpen',
+      'u': 'mouthOpen',
+      'p': 'mouthOpen',
+      'b': 'mouthOpen',
+      'm': 'mouthOpen',
+      'f': 'mouthOpen',
+      'v': 'mouthOpen',
+      't': 'mouthOpen',
+      'd': 'mouthOpen',
+      'n': 'mouthOpen',
+      's': 'mouthSmile',
+      'z': 'mouthSmile',
+      'th': 'mouthOpen',
+      'ch': 'mouthOpen',
+      'j': 'mouthOpen',
+      'sh': 'mouthSmile',
+      'zh': 'mouthSmile',
+      'k': 'mouthOpen',
+      'g': 'mouthOpen',
+      'ng': 'mouthOpen',
+      'h': 'mouthOpen',
+      'w': 'mouthOpen',
+      'y': 'mouthSmile',
+      'r': 'mouthOpen',
+      'l': 'mouthOpen'
+    };
+
+    // Function to speak text using TalkingHead with audio synchronization
+    function speakText(text) {
+      if (window.isSpeaking) {
+        console.log("Already speaking, please wait");
+        return;
+      }
+      
+      console.log(`Speaking: "${text}"`);
+      window.isSpeaking = true;
+      
+      // Reset all visemes
+      window.commonVisemes.forEach(viseme => setViseme(viseme, 0));
+      
+      if (window.talkingHead) {
+        // Use TalkingHead library to process speech with audio
+        window.talkingHead.speak(text, {
+          audio: false,         // Enable audio generation
+          rate: 1.0,           // Speech rate
+          pitch: 1.0,          // Speech pitch
+          volume: 1.0,         // Speech volume
+          intensity: 1.5,      // Increased intensity for more pronounced visemes (default is 1.0)
+          smoothing: 0.5,      // Smoothing factor for viseme transitions
+          onstart: () => {
+            console.log("Speech started");
+            
+            // Send event to Flutter
+            try {
+              if (window.flutter_inappwebview) {
+                window.flutter_inappwebview.callHandler('avatarEvent', 'speakStart', { text });
+              }
+            } catch (e) {
+              console.error("Error sending speak start event to Flutter:", e);
+            }
+          },
+          onviseme: (viseme, value, time) => {
+            // Map TalkingHead visemes to our viseme system with amplified values
+            const visemeName = mapToAvatarViseme(viseme);
+            if (visemeName) {
+              // Amplify the value to make mouth movements more pronounced
+              const amplifiedValue = Math.min(value * 1.75, 1.0);
+              
+              setTimeout(() => {
+                setViseme(visemeName, amplifiedValue);
+                
+                // For certain strong visemes, add secondary movements
+                if (viseme === 'A' || viseme === 'E' || viseme === 'O') {
+                  // For vowels, add some smile when mouth is open for more expressiveness
+                  if (visemeName === 'mouthOpen' && amplifiedValue > 0.5) {
+                    setViseme('mouthSmile', amplifiedValue * 0.3);
+                  }
+                }
+              }, time * 1000);
+            }
+          },
+          onend: () => {
+            console.log("Speech ended");
+            window.isSpeaking = false;
+            
+            // Reset all visemes
+            setTimeout(() => {
+              window.commonVisemes.forEach(viseme => setViseme(viseme, 0));
+            }, 100);
+            
+            // Send event to Flutter
+            try {
+              if (window.flutter_inappwebview) {
+                window.flutter_inappwebview.callHandler('avatarEvent', 'speakEnd', { text });
+              }
+            } catch (e) {
+              console.error("Error sending speak end event to Flutter:", e);
+            }
+          }
+        });
+      } else {
+        // Fallback if TalkingHead is not available - simple animation
+        console.log("Using fallback speech animation");
+        simulateSpeech(text);
+      }
+    }
+
+    // Map TalkingHead visemes to our avatar's visemes
+    function mapToAvatarViseme(thViseme) {
+      // Improved mapping with better viseme correlation
+      const mapping = {
+        'A': 'mouthOpen',    // 'ah' as in "father" - wide open mouth
+        'B': 'mouthOpen',    // 'b', 'm', 'p' - closed lips that should pop open
+        'C': 'mouthSmile',   // 'ee' as in "meet" - spread lips
+        'D': 'mouthOpen',    // 'oh' as in "toe" - rounded lips
+        'E': 'mouthOpen',    // 'ah' as in "bat" - slightly open mouth
+        'F': 'mouthSmile',   // 'f', 'v' - lower lip against upper teeth
+        'G': 'mouthSmile',   // dental 't', 'd', 'n' - tongue tip behind upper teeth
+        'H': 'mouthOpen',    // 'k', 'g', 'ng' - tongue back raised
+        'X': 'mouthOpen'     // Rest position - neutral/slight mouth opening
+      };
+      
+      // If we don't have an exact match for the viseme, return the closest one
+      // Prioritize mouthOpen for most speech sounds as it's more visible
+      return mapping[thViseme] || 'mouthOpen';
+    }
+
+    // Simple fallback animation if TalkingHead is not available
+    function simulateSpeech(text) {
+      const words = text.split(' ');
+      const duration = Math.max(1000, words.length * 300); // Rough estimate of duration
+      const steps = Math.floor(duration / 100); // 10 frames per second
+      
+      // Try to create audio with the Web Speech API as a fallback
+      let utterance = null;
+      if (window.speechSynthesis) {
+        utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+        window.speechSynthesis.speak(utterance);
+      }
+      
+      // Send event to Flutter
+      try {
+        if (window.flutter_inappwebview) {
+          window.flutter_inappwebview.callHandler('avatarEvent', 'speakStart', { text });
+        }
+      } catch (e) {
+        console.error("Error sending speak start event to Flutter:", e);
+      }
+      
+      let currentStep = 0;
+      
+      const interval = setInterval(() => {
+        if (currentStep >= steps) {
+          clearInterval(interval);
+          window.commonVisemes.forEach(viseme => setViseme(viseme, 0));
+          window.isSpeaking = false;
+          
+          // Send event to Flutter
+          try {
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler('avatarEvent', 'speakEnd', { text });
+            }
+          } catch (e) {
+            console.error("Error sending speak end event to Flutter:", e);
+          }
+          
+          return;
+        }
+        
+        // More realistic mouth movements with occasional pauses
+        const phase = currentStep / steps;
+        let openValue, smileValue;
+        
+        if (currentStep % 5 === 0) {
+          // Occasional wider mouth opening for emphasis
+          openValue = 0.7 + Math.random() * 0.3; // Between 0.7 and 1.0
+          smileValue = Math.random() * 0.4;
+        } else if (currentStep % 10 === 0) {
+          // Occasional pause
+          openValue = 0.1;
+          smileValue = 0.1;
+        } else {
+          // Normal speaking movement
+          openValue = 0.3 + Math.random() * 0.5; // Between 0.3 and 0.8
+          smileValue = Math.random() * 0.3;
+        }
+        
+        setViseme('mouthOpen', openValue);
+        setViseme('mouthSmile', smileValue);
+        
+        currentStep++;
+      }, 100);
     }
 
     function loadAvatar(url) {
@@ -211,6 +482,9 @@
             }
           });
           
+          // Create the UI controls
+          // createVisemeControls();
+          
           // Set flag that avatar is loaded and ready
           window.avatarLoaded = true;
           
@@ -246,6 +520,9 @@
             'mouthSmile': 1
           };
           
+          // Create the UI controls
+          // createVisemeControls();
+          
           // Set flag that avatar is loaded
           window.avatarLoaded = true;
           
@@ -262,6 +539,7 @@
     // Expose functions to window object for Flutter to call
     window.setViseme = setViseme;
     window.testVisemes = testVisemes;
+    window.speakText = speakText;
     window.getVisemeList = () => Object.keys(window.visemeMap);
     window.resetVisemes = () => {
       window.commonVisemes.forEach(viseme => setViseme(viseme, 0));
